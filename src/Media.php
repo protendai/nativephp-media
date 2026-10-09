@@ -204,11 +204,29 @@ class Media
      * @param  'audio'|'video'  $type
      * @return list<array{id: string, uri: string, title: ?string, artist: ?string, album: ?string, durationMs: int, size: int, dateAdded: int, folder: ?string, mime: ?string}>
      */
-    public function library(string $type = 'audio', int $limit = 500): array
+    public function library(string $type = 'audio', int $limit = 500, int $offset = 0): array
     {
-        $result = $this->decode($this->call('Media.Library', ['type' => $type, 'limit' => $limit]));
+        return $this->libraryPage($type, $limit, $offset)['items'];
+    }
 
-        return array_values(array_filter($result['items'] ?? [], 'is_array'));
+    /**
+     * One page of the device library plus the total count, for paging
+     * through libraries with thousands of files.
+     *
+     * @param  'audio'|'video'  $type
+     * @return array{items: list<array<string, mixed>>, total: int, offset: int}
+     */
+    public function libraryPage(string $type = 'audio', int $limit = 60, int $offset = 0): array
+    {
+        $result = $this->decode($this->call('Media.Library', ['type' => $type, 'limit' => $limit, 'offset' => $offset]));
+        $items = array_values(array_filter($result['items'] ?? [], 'is_array'));
+
+        return [
+            'items' => $items,
+            // Older native builds don't report a total; assume no more pages.
+            'total' => (int) ($result['total'] ?? ($offset + count($items))),
+            'offset' => $offset,
+        ];
     }
 
     /**

@@ -117,7 +117,8 @@ $tags = Media::probe($songs[0]['uri'], storage_path('app/covers/1.jpg'));
 | `isActive()` | `bool` | A queue is loaded (playing or paused) |
 | `openVideo(array $items, int $startIndex = 0, int $startPosition = -1)` | `bool` | Full-screen gesture player |
 | `probe(string $uri, ?string $artworkDest = null)` | `array` | `ok, title, artist, album, durationMs, width, height, hasArtwork` |
-| `library(string $type = 'audio', int $limit = 500)` | `array` | Device media from MediaStore (needs permission) |
+| `library(string $type = 'audio', int $limit = 500, int $offset = 0)` | `array` | Device media from MediaStore, newest first (needs permission) |
+| `libraryPage(string $type = 'audio', int $limit = 60, int $offset = 0)` | `array` | `['items', 'total', 'offset']`: page through big libraries without crossing thousands of rows over the bridge |
 | `hasPermission(string $type = 'audio')` | `bool` | |
 | `requestPermission(string $type = 'audio')` | `void` | → `PermissionResult` |
 

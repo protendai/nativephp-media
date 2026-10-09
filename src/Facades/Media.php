@@ -21,7 +21,8 @@ use Illuminate\Support\Facades\Facade;
  * @method static bool isActive()
  * @method static bool openVideo(array $items, int $startIndex = 0, int $startPosition = -1)
  * @method static array probe(string $uri, ?string $artworkDest = null)
- * @method static array library(string $type = 'audio', int $limit = 500)
+ * @method static array libraryPage(string $type = 'audio', int $limit = 60, int $offset = 0)
+ * @method static array library(string $type = 'audio', int $limit = 500, int $offset = 0)
  * @method static bool hasPermission(string $type = 'audio')
  * @method static void requestPermission(string $type = 'audio')
  *

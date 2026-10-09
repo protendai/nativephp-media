@@ -205,6 +205,7 @@ object MediaFunctions {
         override fun execute(parameters: Map<String, Any>): Map<String, Any> {
             val video = parameters["type"] == "video"
             val limit = int(parameters["limit"], 500).coerceAtLeast(1)
+            val offset = int(parameters["offset"], 0).coerceAtLeast(0)
             val collection = if (video) MediaStore.Video.Media.EXTERNAL_CONTENT_URI else MediaStore.Audio.Media.EXTERNAL_CONTENT_URI
 
             val projection = buildList {
@@ -223,9 +224,14 @@ object MediaFunctions {
             val selection = if (video) null else "${MediaStore.Audio.AudioColumns.IS_MUSIC} != 0"
 
             val items = mutableListOf<Map<String, Any>>()
+            var total = 0
             return try {
                 activity.contentResolver.query(collection, projection, selection, null, "${MediaStore.MediaColumns.DATE_ADDED} DESC")?.use { cursor ->
+                    total = cursor.count
                     val idCol = cursor.getColumnIndexOrThrow(MediaStore.MediaColumns._ID)
+                    // Page with offset/limit: libraries can hold thousands of tracks,
+                    // and only one page should ever cross the bridge.
+                    if (offset > 0 && !cursor.moveToPosition(offset - 1)) return@use
                     while (cursor.moveToNext() && items.size < limit) {
                         val id = cursor.getLong(idCol)
                         items += mapOf(
@@ -242,9 +248,9 @@ object MediaFunctions {
                         )
                     }
                 }
-                mapOf("ok" to true, "items" to items)
+                mapOf("ok" to true, "items" to items, "total" to total, "offset" to offset)
             } catch (e: Exception) {
-                mapOf("ok" to false, "items" to emptyList<Any>(), "error" to (e.message ?: "query failed"))
+                mapOf("ok" to false, "items" to emptyList<Any>(), "total" to 0, "offset" to offset, "error" to (e.message ?: "query failed"))
             }
         }
 

@@ -34,7 +34,7 @@ Shared spec for parallel implementation. Every piece MUST match these names exac
 | `Media.State` | – | state object (below), cached on native side, safe from any thread | – |
 | `Media.OpenVideo` | `items: [item]`, `startIndex: int=0`, `startPosition: int=-1` | `{ok}` | opens full-screen `VideoActivity` playing through the same session |
 | `Media.Probe` | `uri: string`, `artworkDest: ?string` (write embedded art / video frame JPEG there) | `{ok, title, artist, album, durationMs, width, height, hasArtwork}` sync | – |
-| `Media.Library` | `type: "audio"|"video"`, `limit: int=500` | `{ok, items:[{id, uri (content://), title, artist, album, durationMs, size, dateAdded, folder, mime}]}` sync, MediaStore query | – |
+| `Media.Library` | `type: "audio"|"video"`, `limit: int=500`, `offset: int=0` | `{ok, total, offset, items:[{id, uri (content://), title, artist, album, durationMs, size, dateAdded, folder, mime}]}` sync, MediaStore query, newest first | – |
 | `Media.RequestPermission` | `type: "audio"|"video"` | `{ok, granted?}` | `PermissionResult` |
 | `Media.HasPermission` | `type` | `{granted: bool}` | – |
 

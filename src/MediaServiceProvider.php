@@ -44,7 +44,7 @@ class MediaServiceProvider extends ServiceProvider
 
             return $this
                 ->respondTo('Media.State', array_merge(Media::IDLE_STATE, $state))
-                ->respondTo('Media.Library', ['ok' => true, 'items' => array_values($library)])
+                ->respondTo('Media.Library', ['ok' => true, 'items' => array_values($library), 'total' => count($library), 'offset' => 0])
                 ->respondTo('Media.HasPermission', ['granted' => $permission])
                 ->respondTo('Media.Probe', [
                     'ok' => true, 'title' => null, 'artist' => null, 'album' => null,
