@@ -1,0 +1,34 @@
+{
+    "name": "protendai/nativephp-media",
+    "description": "A proper media player for NativePHP Mobile: background audio with lock-screen and notification controls, queues, shuffle/repeat, resume, a gesture video player with picture-in-picture, and device media library access. Android.",
+    "type": "nativephp-plugin",
+    "license": "proprietary",
+    "keywords": ["nativephp", "nativephp-plugin", "media", "audio", "video", "player", "background", "media3", "android"],
+    "authors": [
+        {"name": "Tendai Karuma"}
+    ],
+    "require": {
+        "php": "^8.2",
+        "nativephp/mobile": "^4.0"
+    },
+    "autoload": {
+        "psr-4": {
+            "Protendai\\Media\\": "src/"
+        }
+    },
+    "extra": {
+        "laravel": {
+            "providers": [
+                "Protendai\\Media\\MediaServiceProvider"
+            ],
+            "aliases": {
+                "Media": "Protendai\\Media\\Facades\\Media"
+            }
+        },
+        "nativephp": {
+            "manifest": "nativephp.json"
+        }
+    },
+    "minimum-stability": "stable",
+    "prefer-stable": true
+}

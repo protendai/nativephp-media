@@ -1,0 +1,147 @@
+{
+    "namespace": "Media",
+    "bridge_functions": [
+        {
+            "name": "Media.SetQueue",
+            "android": "com.protendai.media.MediaFunctions.SetQueue",
+            "ios": "MediaFunctions.SetQueue"
+        },
+        {
+            "name": "Media.Play",
+            "android": "com.protendai.media.MediaFunctions.Play",
+            "ios": "MediaFunctions.Play"
+        },
+        {
+            "name": "Media.Pause",
+            "android": "com.protendai.media.MediaFunctions.Pause",
+            "ios": "MediaFunctions.Pause"
+        },
+        {
+            "name": "Media.Toggle",
+            "android": "com.protendai.media.MediaFunctions.Toggle",
+            "ios": "MediaFunctions.Toggle"
+        },
+        {
+            "name": "Media.Next",
+            "android": "com.protendai.media.MediaFunctions.Next",
+            "ios": "MediaFunctions.Next"
+        },
+        {
+            "name": "Media.Previous",
+            "android": "com.protendai.media.MediaFunctions.Previous",
+            "ios": "MediaFunctions.Previous"
+        },
+        {
+            "name": "Media.SkipTo",
+            "android": "com.protendai.media.MediaFunctions.SkipTo",
+            "ios": "MediaFunctions.SkipTo"
+        },
+        {
+            "name": "Media.Seek",
+            "android": "com.protendai.media.MediaFunctions.Seek",
+            "ios": "MediaFunctions.Seek"
+        },
+        {
+            "name": "Media.SetShuffle",
+            "android": "com.protendai.media.MediaFunctions.SetShuffle",
+            "ios": "MediaFunctions.SetShuffle"
+        },
+        {
+            "name": "Media.SetRepeat",
+            "android": "com.protendai.media.MediaFunctions.SetRepeat",
+            "ios": "MediaFunctions.SetRepeat"
+        },
+        {
+            "name": "Media.SetSpeed",
+            "android": "com.protendai.media.MediaFunctions.SetSpeed",
+            "ios": "MediaFunctions.SetSpeed"
+        },
+        {
+            "name": "Media.Stop",
+            "android": "com.protendai.media.MediaFunctions.Stop",
+            "ios": "MediaFunctions.Stop"
+        },
+        {
+            "name": "Media.State",
+            "android": "com.protendai.media.MediaFunctions.State",
+            "ios": "MediaFunctions.State"
+        },
+        {
+            "name": "Media.OpenVideo",
+            "android": "com.protendai.media.MediaFunctions.OpenVideo",
+            "ios": "MediaFunctions.OpenVideo"
+        },
+        {
+            "name": "Media.Probe",
+            "android": "com.protendai.media.MediaFunctions.Probe",
+            "ios": "MediaFunctions.Probe"
+        },
+        {
+            "name": "Media.Library",
+            "android": "com.protendai.media.MediaFunctions.Library",
+            "ios": "MediaFunctions.Library"
+        },
+        {
+            "name": "Media.RequestPermission",
+            "android": "com.protendai.media.MediaFunctions.RequestPermission",
+            "ios": "MediaFunctions.RequestPermission"
+        },
+        {
+            "name": "Media.HasPermission",
+            "android": "com.protendai.media.MediaFunctions.HasPermission",
+            "ios": "MediaFunctions.HasPermission"
+        }
+    ],
+    "events": [
+        "Protendai\\Media\\Events\\StateChanged",
+        "Protendai\\Media\\Events\\TrackChanged",
+        "Protendai\\Media\\Events\\PlaybackError",
+        "Protendai\\Media\\Events\\QueueEnded",
+        "Protendai\\Media\\Events\\PermissionResult"
+    ],
+    "android": {
+        "permissions": [
+            "android.permission.FOREGROUND_SERVICE",
+            "android.permission.FOREGROUND_SERVICE_MEDIA_PLAYBACK",
+            "android.permission.WAKE_LOCK",
+            "android.permission.READ_MEDIA_AUDIO",
+            "android.permission.READ_MEDIA_VIDEO",
+            "<uses-permission android:name=\"android.permission.READ_EXTERNAL_STORAGE\" android:maxSdkVersion=\"32\" />"
+        ],
+        "services": [
+            {
+                "name": "com.protendai.media.PlaybackService",
+                "exported": true,
+                "foregroundServiceType": "mediaPlayback",
+                "intent_filters": [
+                    {
+                        "action": "androidx.media3.session.MediaSessionService"
+                    }
+                ]
+            }
+        ],
+        "activities": [
+            {
+                "name": "com.protendai.media.VideoActivity",
+                "theme": "@style/Theme.AppCompat.NoActionBar",
+                "exported": false,
+                "launchMode": "singleTask",
+                "configChanges": "orientation|screenSize|screenLayout|smallestScreenSize|keyboardHidden"
+            }
+        ],
+        "dependencies": {
+            "implementation": [
+                "androidx.media3:media3-exoplayer:1.5.1",
+                "androidx.media3:media3-session:1.5.1",
+                "androidx.media3:media3-ui:1.5.1"
+            ]
+        },
+        "min_version": 29
+    },
+    "ios": {
+        "min_version": "18.0"
+    },
+    "hooks": {
+        "post_compile": "nativephp:media:enable-pip"
+    }
+}
