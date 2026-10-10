@@ -1,6 +1,6 @@
 # Media for NativePHP Mobile
 
-A **proper media player** for NativePHP Mobile apps: music that keeps playing with the app closed, with controls on the lock screen, in the notification shade and on Bluetooth headphones, plus a full-screen gesture video player with picture-in-picture. Built on Android's Media3 (the engine behind YouTube Music's and Google's own players).
+A **proper media player** for NativePHP Mobile apps (Android and iOS): music that keeps playing with the app closed, with controls on the lock screen, in the notification shade and on Bluetooth headphones, plus a full-screen gesture video player with picture-in-picture. Built on Android's Media3 (the engine behind YouTube Music's and Google's own players).
 
 - **Background playback** in a real Android media service (foreground service, `mediaPlayback` type)
 - **Lock screen, notification and Bluetooth/headset controls** for free via a `MediaSession`
@@ -14,7 +14,7 @@ A **proper media player** for NativePHP Mobile apps: music that keeps playing wi
 | Platform | Support |
 |---|---|
 | Android 10+ (API 29) | Full |
-| iOS | Stub: `state()` reports idle and every call returns `false`. iOS support is planned. |
+| iOS 18+ | Full, with iOS-native pieces: `AVPlayer` queue, background audio, lock screen / Control Center, the standard iOS video player with picture-in-picture. `library()` lists the Music app's downloaded DRM-free songs (`ipod-library://` uris) and Photos videos (`ph://` uris); these play and probe but are not file paths. |
 
 ## How background playback works
 

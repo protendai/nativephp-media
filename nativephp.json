@@ -139,7 +139,14 @@
         "min_version": 29
     },
     "ios": {
-        "min_version": "18.0"
+        "min_version": "18.0",
+        "background_modes": [
+            "audio"
+        ],
+        "info_plist": {
+            "NSAppleMusicUsageDescription": "Lets you play the music saved on this iPhone.",
+            "NSPhotoLibraryUsageDescription": "Lets you play the videos in your photo library."
+        }
     },
     "hooks": {
         "post_compile": "nativephp:media:enable-pip"

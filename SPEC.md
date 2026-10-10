@@ -74,7 +74,14 @@ Shared spec for parallel implementation. Every piece MUST match these names exac
 
 ## iOS
 
-Stub only (`resources/ios/MediaFunctions.swift`, enum `MediaFunctions`): every function returns `{ok:false, reason:"unsupported"}`; `State` returns the idle state object; `Library` returns `{ok:false, items:[]}`. `ios.min_version "18.0"`.
+Implemented in `resources/ios/` (iOS 18+, no pods): `MediaFunctions.swift` (enum `MediaFunctions`, bridge classes + `ProtendaiMediaLibrary`), `MediaPlayerEngine.swift` (`ProtendaiMediaPlayer`: one `AVPlayer` driving the queue, shuffle order, repeat, speed via `defaultRate`, per-id resume in `UserDefaults` key `protendai_media_positions`, same 5 s save / end-margin rules, `MPNowPlayingInfoCenter` + `MPRemoteCommandCenter`, `AVAudioSession` `.playback`, pause on interruption/headphones out), `MediaVideoController.swift` (`AVPlayerViewController` on the shared player, PiP, pauses when closed unless in PiP).
+
+Differences from Android:
+- `Media.Library` audio = Music app songs that are downloaded and DRM-free (`MPMediaQuery`, `assetURL` set, not cloud/protected), uri `ipod-library://…`; video = Photos library videos, uri `ph://<localIdentifier>`. `size` is 0, `folder` is the album (audio) / `"Photos"` (video). Without permission: `{ok:true, items:[], total:0}`.
+- `ph://` uris play (resolved through `PHImageManager`) and `Media.Probe` reads them (duration, size, Photos thumbnail as artwork), but they are not file paths.
+- `Media.RequestPermission` asks for Media Library (audio) or Photos read access (video); limited Photos access counts as granted.
+- `Media.OpenVideo` uses iOS's standard player UI (scrub, skip, speed, PiP) instead of the custom gesture overlay.
+- Manifest: `background_modes: ["audio"]`, `NSAppleMusicUsageDescription`, `NSPhotoLibraryUsageDescription`.
 
 ## Tumira integration (app agent)
 
