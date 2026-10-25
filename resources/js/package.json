@@ -1,0 +1,27 @@
+{
+    "name": "@protendai/nativephp-media",
+    "version": "1.0.0",
+    "description": "JavaScript API for the protendai/nativephp-media NativePHP Mobile plugin (iOS and Android media player).",
+    "private": false,
+    "type": "module",
+    "main": "index.js",
+    "module": "index.js",
+    "types": "index.d.ts",
+    "exports": {
+        ".": {
+            "types": "./index.d.ts",
+            "import": "./index.js"
+        }
+    },
+    "files": ["index.js", "index.d.ts"],
+    "keywords": ["nativephp", "nativephp-plugin", "media", "audio", "video", "player"],
+    "author": "Tendai Karuma <karumatendai@gmail.com>",
+    "license": "MIT",
+    "homepage": "https://github.com/protendai/nativephp-media",
+    "repository": {
+        "type": "git",
+        "url": "git+https://github.com/protendai/nativephp-media.git",
+        "directory": "resources/js"
+    },
+    "bugs": "https://github.com/protendai/nativephp-media/issues"
+}
