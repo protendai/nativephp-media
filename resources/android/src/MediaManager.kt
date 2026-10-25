@@ -339,7 +339,7 @@ object MediaManager {
         override fun onPlayerError(error: PlaybackException) {
             // The message can contain the file path or URL: give PHP the error, keep logs free of it.
             lastError = error.message ?: error.errorCodeName
-            Log.w(TAG, "Playback error ${error.errorCodeName}")
+            Log.w(TAG, "Playback error " + error.errorCodeName)
             dispatch(
                 "PlaybackError",
                 JSONObject()

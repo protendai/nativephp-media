@@ -3,7 +3,22 @@
     "description": "Media player for NativePHP Mobile on iOS and Android: background audio with lock-screen, notification and Bluetooth controls, queues, shuffle/repeat, speed, per-item resume, a full-screen video player with picture-in-picture, and opt-in device media library access.",
     "type": "nativephp-plugin",
     "license": "MIT",
-    "keywords": ["nativephp", "nativephp-plugin", "nativephp-mobile", "laravel", "media", "audio", "video", "player", "background-audio", "picture-in-picture", "media3", "avplayer", "android", "ios"],
+    "keywords": [
+        "nativephp",
+        "nativephp-plugin",
+        "nativephp-mobile",
+        "laravel",
+        "media",
+        "audio",
+        "video",
+        "player",
+        "background-audio",
+        "picture-in-picture",
+        "media3",
+        "avplayer",
+        "android",
+        "ios"
+    ],
     "homepage": "https://github.com/protendai/nativephp-media",
     "support": {
         "issues": "https://github.com/protendai/nativephp-media/issues",
@@ -20,11 +35,17 @@
         "nativephp/mobile": "^4.0"
     },
     "require-dev": {
+        "orchestra/testbench": "^9.0|^10.0|^11.0",
         "pestphp/pest": "^3.0|^4.0"
     },
     "autoload": {
         "psr-4": {
             "Protendai\\Media\\": "src/"
+        }
+    },
+    "autoload-dev": {
+        "psr-4": {
+            "Protendai\\Media\\Tests\\": "tests/"
         }
     },
     "extra": {
