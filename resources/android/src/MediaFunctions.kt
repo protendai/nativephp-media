@@ -8,6 +8,7 @@ import android.media.MediaMetadataRetriever
 import android.net.Uri
 import android.provider.MediaStore
 import androidx.fragment.app.FragmentActivity
+import androidx.media3.common.Player
 import com.nativephp.mobile.bridge.BridgeFunction
 import org.json.JSONArray
 import org.json.JSONObject
@@ -46,7 +47,9 @@ object MediaFunctions {
 
     class Toggle(private val activity: FragmentActivity) : BridgeFunction {
         override fun execute(parameters: Map<String, Any>) = command(activity) {
-            if (it.isPlaying) it.pause() else MediaManager.play(it)
+            // playWhenReady, not isPlaying: a buffering player counts as playing (as on iOS).
+            val active = it.playWhenReady && it.playbackState != Player.STATE_ENDED && it.playbackState != Player.STATE_IDLE
+            if (active) it.pause() else MediaManager.play(it)
         }
     }
 
