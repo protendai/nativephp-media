@@ -1,15 +1,26 @@
 {
     "name": "protendai/nativephp-media",
-    "description": "A proper media player for NativePHP Mobile: background audio with lock-screen and notification controls, queues, shuffle/repeat, resume, a gesture video player with picture-in-picture, and device media library access. Android.",
+    "description": "Media player for NativePHP Mobile on iOS and Android: background audio with lock-screen, notification and Bluetooth controls, queues, shuffle/repeat, speed, per-item resume, a full-screen video player with picture-in-picture, and opt-in device media library access.",
     "type": "nativephp-plugin",
-    "license": "proprietary",
-    "keywords": ["nativephp", "nativephp-plugin", "media", "audio", "video", "player", "background", "media3", "android"],
+    "license": "MIT",
+    "keywords": ["nativephp", "nativephp-plugin", "nativephp-mobile", "laravel", "media", "audio", "video", "player", "background-audio", "picture-in-picture", "media3", "avplayer", "android", "ios"],
+    "homepage": "https://github.com/protendai/nativephp-media",
+    "support": {
+        "issues": "https://github.com/protendai/nativephp-media/issues",
+        "source": "https://github.com/protendai/nativephp-media"
+    },
     "authors": [
-        {"name": "Tendai Karuma"}
+        {
+            "name": "Tendai Karuma",
+            "email": "karumatendai@gmail.com"
+        }
     ],
     "require": {
         "php": "^8.2",
         "nativephp/mobile": "^4.0"
+    },
+    "require-dev": {
+        "pestphp/pest": "^3.0|^4.0"
     },
     "autoload": {
         "psr-4": {
@@ -27,6 +38,15 @@
         },
         "nativephp": {
             "manifest": "nativephp.json"
+        }
+    },
+    "scripts": {
+        "test": "pest"
+    },
+    "config": {
+        "sort-packages": true,
+        "allow-plugins": {
+            "pestphp/pest-plugin": true
         }
     },
     "minimum-stability": "stable",
