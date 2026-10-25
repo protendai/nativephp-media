@@ -12,11 +12,32 @@ final class ProtendaiVideoController: AVPlayerViewController, AVPlayerViewContro
 
     private var inPictureInPicture = false
 
-    static func present() {
+    /// Queue ids this player screen opened: leaving it only pauses while the
+    /// shared player still holds one of them (music started meanwhile keeps playing).
+    private var openedIds: Set<String> = []
+
+    private var ownsPlayback: Bool {
+        guard let id = ProtendaiMediaPlayer.shared.currentId else { return false }
+        return openedIds.isEmpty || openedIds.contains(id)
+    }
+
+    static func present(ids: Set<String> = []) {
         DispatchQueue.main.async {
-            if let existing = current, existing.presentingViewController != nil { return }
+            if let existing = current {
+                existing.openedIds = ids
+                // Already on screen: the new queue plays in it.
+                if existing.presentingViewController != nil { return }
+                // In picture-in-picture: bring the same controller back full screen
+                // instead of stacking a second player on top of the PiP one.
+                if existing.inPictureInPicture {
+                    topViewController()?.present(existing, animated: true)
+                    return
+                }
+                current = nil
+            }
 
             let controller = ProtendaiVideoController()
+            controller.openedIds = ids
             controller.player = ProtendaiMediaPlayer.shared.player
             controller.delegate = controller
             controller.allowsPictureInPicturePlayback = true
@@ -41,7 +62,7 @@ final class ProtendaiVideoController: AVPlayerViewController, AVPlayerViewContro
         super.viewDidDisappear(animated)
         guard isBeingDismissed || presentingViewController == nil else { return }
         if !inPictureInPicture {
-            ProtendaiMediaPlayer.shared.pause()
+            if ownsPlayback { ProtendaiMediaPlayer.shared.pause() }
             Self.current = nil
         }
     }

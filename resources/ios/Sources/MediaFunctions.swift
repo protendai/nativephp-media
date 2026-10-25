@@ -115,9 +115,10 @@ enum MediaFunctions {
             guard !items.isEmpty else { return BridgeResponse.success(data: ["ok": false]) }
             let startIndex = MediaFunctions.int(parameters["startIndex"], 0)
             let startPosition = MediaFunctions.int(parameters["startPosition"], -1)
+            let ids = Set(items.map(\.id))
             DispatchQueue.main.async {
                 ProtendaiMediaPlayer.shared.setQueue(items, startIndex: startIndex, startPositionMs: startPosition, play: true)
-                ProtendaiVideoController.present()
+                ProtendaiVideoController.present(ids: ids)
             }
             return BridgeResponse.success(data: ["ok": true])
         }
@@ -147,15 +148,21 @@ enum MediaFunctions {
     }
 
     /// Music library (audio) or Photos (video) access. Result: PermissionResult.
+    /// Needs library access enabled at build time (the usage-description key in
+    /// Info.plist); without it, answers granted = false instead of crashing.
     class RequestPermission: BridgeFunction {
         func execute(parameters: [String: Any]) throws -> [String: Any] {
             let type = (parameters["type"] as? String) == "video" ? "video" : "audio"
             if ProtendaiMediaLibrary.granted(type) {
-                ProtendaiMediaPlayer.shared.dispatch("PermissionResult", ["granted": true, "type": type])
-                return BridgeResponse.success(data: ["ok": true, "granted": true])
+                ProtendaiMediaLibrary.dispatchResult(type)
+                return BridgeResponse.success(data: ["ok": true, "granted": true, "limited": ProtendaiMediaLibrary.limited(type)])
             }
-            ProtendaiMediaLibrary.request(type) { granted in
-                ProtendaiMediaPlayer.shared.dispatch("PermissionResult", ["granted": granted, "type": type])
+            guard ProtendaiMediaLibrary.usageDeclared(type) else {
+                ProtendaiMediaLibrary.dispatchResult(type)
+                return BridgeResponse.success(data: ["ok": false, "granted": false, "error": "library_disabled"])
+            }
+            ProtendaiMediaLibrary.request(type) { _ in
+                ProtendaiMediaLibrary.dispatchResult(type)
             }
             return BridgeResponse.success(data: ["ok": true])
         }
@@ -164,7 +171,10 @@ enum MediaFunctions {
     class HasPermission: BridgeFunction {
         func execute(parameters: [String: Any]) throws -> [String: Any] {
             let type = (parameters["type"] as? String) == "video" ? "video" : "audio"
-            return BridgeResponse.success(data: ["granted": ProtendaiMediaLibrary.granted(type)])
+            return BridgeResponse.success(data: [
+                "granted": ProtendaiMediaLibrary.granted(type),
+                "limited": ProtendaiMediaLibrary.limited(type),
+            ])
         }
     }
 
@@ -209,6 +219,25 @@ enum ProtendaiMediaLibrary {
         return MPMediaLibrary.authorizationStatus() == .authorized
     }
 
+    /// Limited Photos access ("Selected Photos"): counts as granted, reported as limited.
+    static func limited(_ type: String) -> Bool {
+        type == "video" && PHPhotoLibrary.authorizationStatus(for: .readWrite) == .limited
+    }
+
+    /// The Info.plist usage string must exist before asking, or iOS terminates the app.
+    static func usageDeclared(_ type: String) -> Bool {
+        let key = type == "video" ? "NSPhotoLibraryUsageDescription" : "NSAppleMusicUsageDescription"
+        return Bundle.main.object(forInfoDictionaryKey: key) != nil
+    }
+
+    static func dispatchResult(_ type: String) {
+        ProtendaiMediaPlayer.shared.dispatch("PermissionResult", [
+            "granted": granted(type),
+            "type": type,
+            "limited": limited(type),
+        ])
+    }
+
     static func request(_ type: String, completion: @escaping (Bool) -> Void) {
         if type == "video" {
             PHPhotoLibrary.requestAuthorization(for: .readWrite) { status in
@@ -223,15 +252,31 @@ enum ProtendaiMediaLibrary {
 
     // MARK: Songs (Music app)
 
+    private static let songsLock = NSLock()
+    private static var songsCache: (stamp: Date, items: [MPMediaItem])?
+
+    /// Downloaded, DRM-free songs, newest first. Cached between pages until
+    /// the Music library changes, so paging doesn't re-read and re-sort it.
+    private static func allSongs() -> [MPMediaItem] {
+        let stamp = MPMediaLibrary.default().lastModifiedDate
+        songsLock.lock()
+        defer { songsLock.unlock() }
+        if let cache = songsCache, cache.stamp == stamp { return cache.items }
+
+        let items = (MPMediaQuery.songs().items ?? [])
+            .filter { $0.assetURL != nil && !$0.hasProtectedAsset && !$0.isCloudItem }
+            .sorted { $0.dateAdded > $1.dateAdded }
+        songsCache = (stamp, items)
+        return items
+    }
+
     /// Downloaded, DRM-free songs only: streaming/cloud and protected items have no playable assetURL.
     static func songs(limit: Int, offset: Int) -> [String: Any] {
         guard granted("audio") else {
             return ["ok": true, "items": [], "total": 0, "offset": offset]
         }
 
-        let all = (MPMediaQuery.songs().items ?? [])
-            .filter { $0.assetURL != nil && !$0.hasProtectedAsset && !$0.isCloudItem }
-            .sorted { $0.dateAdded > $1.dateAdded }
+        let all = allSongs()
 
         let page = all.dropFirst(offset).prefix(limit).map { song -> [String: Any] in
             let url = song.assetURL!
@@ -295,51 +340,88 @@ enum ProtendaiMediaLibrary {
         if uri.hasPrefix("ph://") {
             return probePhoto(identifier: String(uri.dropFirst("ph://".count)), artworkDest: artworkDest)
         }
-        guard let url = ProtendaiMediaItem.url(for: uri) else { return ["ok": false] }
+        guard let url = ProtendaiMediaItem.url(for: uri) else { return ["ok": false, "error": "invalid_uri"] }
+        if url.isFileURL, !FileManager.default.isReadableFile(atPath: url.path) {
+            return ["ok": false, "error": "not_found"]
+        }
 
         let asset = AVURLAsset(url: url)
-        let metadata = asset.commonMetadata
-        func tag(_ key: AVMetadataKey) -> Any {
-            ProtendaiMediaPlayer.orNull(AVMetadataItem.metadataItems(from: metadata, withKey: key, keySpace: .common).first?.stringValue)
+        return blocking { await probeAsset(asset, artworkDest: artworkDest) } ?? ["ok": false, "error": "timeout"]
+    }
+
+    /// Tags, duration, size and preview through the async loading APIs (no deprecated sync getters).
+    private static func probeAsset(_ asset: AVURLAsset, artworkDest: String?) async -> [String: Any] {
+        guard let loaded = try? await asset.load(.duration, .commonMetadata) else {
+            return ["ok": false, "error": "unreadable"]
+        }
+        let (duration, metadata) = loaded
+
+        func tag(_ key: AVMetadataKey) async -> Any {
+            guard let item = AVMetadataItem.metadataItems(from: metadata, withKey: key, keySpace: .common).first,
+                  let value = try? await item.load(.stringValue) else { return NSNull() }
+            return ProtendaiMediaPlayer.orNull(value)
         }
 
-        let duration = asset.duration.seconds
+        let seconds = duration.seconds
         var width = 0
         var height = 0
-        let videoTrack = asset.tracks(withMediaType: .video).first
-        if let track = videoTrack {
-            let size = track.naturalSize.applying(track.preferredTransform)
-            width = Int(abs(size.width))
-            height = Int(abs(size.height))
+        let videoTrack = (try? await asset.loadTracks(withMediaType: .video))?.first
+        if let track = videoTrack, let geometry = try? await track.load(.naturalSize, .preferredTransform) {
+            let rotated = geometry.0.applying(geometry.1)
+            width = Int(abs(rotated.width))
+            height = Int(abs(rotated.height))
         }
+        let hasAudio = !((try? await asset.loadTracks(withMediaType: .audio)) ?? []).isEmpty
 
         var hasArtwork = false
         if let dest = artworkDest {
             var image: UIImage?
-            if let data = AVMetadataItem.metadataItems(from: metadata, withKey: AVMetadataKey.commonKeyArtwork, keySpace: .common).first?.dataValue {
+            if let art = AVMetadataItem.metadataItems(from: metadata, withKey: AVMetadataKey.commonKeyArtwork, keySpace: .common).first,
+               let data = try? await art.load(.dataValue) {
                 image = UIImage(data: data)
             } else if videoTrack != nil {
                 let generator = AVAssetImageGenerator(asset: asset)
                 generator.appliesPreferredTrackTransform = true
                 generator.maximumSize = CGSize(width: maxArt, height: maxArt)
-                let at = CMTime(seconds: min(1, duration.isFinite ? duration / 2 : 0), preferredTimescale: 600)
-                if let cg = try? generator.copyCGImage(at: at, actualTime: nil) {
-                    image = UIImage(cgImage: cg)
+                let at = CMTime(seconds: min(1, seconds.isFinite ? seconds / 2 : 0), preferredTimescale: 600)
+                if let frame = try? await generator.image(at: at) {
+                    image = UIImage(cgImage: frame.image)
                 }
             }
             if let image = image { hasArtwork = writeJpeg(image, to: dest) }
         }
 
+        let title = await tag(.commonKeyTitle)
+        let artist = await tag(.commonKeyArtist)
+        let album = await tag(.commonKeyAlbumName)
+
         return [
-            "ok": duration.isFinite || videoTrack != nil,
-            "title": tag(.commonKeyTitle),
-            "artist": tag(.commonKeyArtist),
-            "album": tag(.commonKeyAlbumName),
-            "durationMs": duration.isFinite ? Int(duration * 1000) : 0,
+            "ok": videoTrack != nil || hasAudio,
+            "title": title,
+            "artist": artist,
+            "album": album,
+            "durationMs": seconds.isFinite ? Int(seconds * 1000) : 0,
             "width": width,
             "height": height,
             "hasArtwork": hasArtwork,
         ]
+    }
+
+    /// Run async work from a synchronous bridge call (bridge calls come in on PHP's thread).
+    private static func blocking(timeout: TimeInterval = 20, _ work: @escaping () async -> [String: Any]) -> [String: Any]? {
+        let box = ProtendaiProbeResultBox()
+        let semaphore = DispatchSemaphore(value: 0)
+        Task.detached {
+            let value = await work()
+            box.lock.lock()
+            box.value = value
+            box.lock.unlock()
+            semaphore.signal()
+        }
+        _ = semaphore.wait(timeout: .now() + timeout)
+        box.lock.lock()
+        defer { box.lock.unlock() }
+        return box.value
     }
 
     private static func probePhoto(identifier: String, artworkDest: String?) -> [String: Any] {
@@ -396,4 +478,10 @@ enum ProtendaiMediaLibrary {
     private static func mime(forExtension ext: String) -> String? {
         ext.isEmpty ? nil : UTType(filenameExtension: ext)?.preferredMIMEType
     }
+}
+
+/// Hands a result from an async probe back to the waiting bridge thread.
+private final class ProtendaiProbeResultBox: @unchecked Sendable {
+    let lock = NSLock()
+    var value: [String: Any]?
 }

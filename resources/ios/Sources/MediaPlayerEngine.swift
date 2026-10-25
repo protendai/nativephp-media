@@ -66,6 +66,10 @@ final class ProtendaiMediaPlayer: NSObject {
     private var wantsPlay = false
     private var pendingSeek: Double?
     private var loadToken = 0
+    /// Id of the item whose AVPlayerItem is in the player right now. Positions
+    /// are saved under this id, never under the queue cursor: the cursor moves
+    /// before the (possibly async) load swaps the player item.
+    private var loadedId: String?
 
     private var tickTimer: Timer?
     private var lastSave = Date.distantPast
@@ -111,6 +115,7 @@ final class ProtendaiMediaPlayer: NSObject {
     /// Replace the queue. startPositionMs < 0 resumes the start item from its saved position.
     func setQueue(_ items: [ProtendaiMediaItem], startIndex: Int, startPositionMs: Int, play: Bool) {
         guard !items.isEmpty else { return }
+        savePosition() // the outgoing item, before the queue is replaced
         queue = items
         let index = min(max(startIndex, 0), items.count - 1)
         rebuildOrder(current: index)
@@ -146,8 +151,10 @@ final class ProtendaiMediaPlayer: NSObject {
         player.timeControlStatus == .paused ? play() : pause()
     }
 
+    /// Next item, from its start (saved positions apply to setQueue and skipTo only, like Android).
     func next() {
         guard !order.isEmpty else { return }
+        savePosition()
         if orderPos + 1 < order.count {
             orderPos += 1
         } else if repeatMode == "all" {
@@ -155,7 +162,7 @@ final class ProtendaiMediaPlayer: NSObject {
         } else {
             return
         }
-        load(index: order[orderPos], position: savedPosition(queue[order[orderPos]].id), play: wantsPlay || isPlaying)
+        load(index: order[orderPos], position: 0, play: wantsPlay || isPlaying)
     }
 
     /// Like Media3: restart the track when past 3 s, otherwise go back one.
@@ -165,12 +172,15 @@ final class ProtendaiMediaPlayer: NSObject {
             seek(toMs: 0)
             return
         }
+        savePosition()
         orderPos = orderPos > 0 ? orderPos - 1 : order.count - 1
         load(index: order[orderPos], position: 0, play: wantsPlay || isPlaying)
     }
 
+    /// Jump to a queue index, resuming that item's saved position.
     func skipTo(_ index: Int) {
         guard index >= 0, index < queue.count else { return }
+        savePosition()
         if let pos = order.firstIndex(of: index) { orderPos = pos }
         ended = false
         load(index: index, position: savedPosition(queue[index].id), play: true)
@@ -211,6 +221,7 @@ final class ProtendaiMediaPlayer: NSObject {
         loadToken += 1
         player.pause()
         player.replaceCurrentItem(with: nil)
+        loadedId = nil
         itemStatusObservation = nil
         queue = []
         order = []
@@ -218,6 +229,8 @@ final class ProtendaiMediaPlayer: NSObject {
         ended = false
         stopTick()
         MPNowPlayingInfoCenter.default().nowPlayingInfo = nil
+        // Hand audio back to whatever the user was listening to before.
+        try? AVAudioSession.sharedInstance().setActive(false, options: .notifyOthersOnDeactivation)
         refreshState()
     }
 
@@ -231,6 +244,9 @@ final class ProtendaiMediaPlayer: NSObject {
     }
 
     private var isPlaying: Bool { player.timeControlStatus == .playing }
+
+    /// Id of the queue item the cursor is on (main thread).
+    var currentId: String? { currentItem?.id }
 
     private var currentSeconds: Double {
         let s = player.currentTime().seconds
@@ -256,7 +272,6 @@ final class ProtendaiMediaPlayer: NSObject {
     private func load(index: Int, position: Double, play: Bool) {
         guard index >= 0, index < queue.count else { return }
         if let pos = order.firstIndex(of: index) { orderPos = pos }
-        savePosition()
 
         loadToken += 1
         let token = loadToken
@@ -273,11 +288,12 @@ final class ProtendaiMediaPlayer: NSObject {
         makePlayerItem(for: item) { [weak self] playerItem in
             guard let self = self, token == self.loadToken else { return }
             guard let playerItem = playerItem else {
-                self.fail(id: item.id, message: "Cannot open \(item.title ?? item.uri)")
+                self.fail(id: item.id, message: "This item could not be opened")
                 return
             }
             self.watch(playerItem, token: token)
             self.player.replaceCurrentItem(with: playerItem)
+            self.loadedId = item.id
             self.player.defaultRate = self.speed
             if play {
                 self.activateSession()
@@ -336,7 +352,6 @@ final class ProtendaiMediaPlayer: NSObject {
 
     private func fail(id: String?, message: String) {
         lastError = message
-        NSLog("ProtendaiMedia: playback error: \(message)")
         var payload: [String: Any] = ["message": message]
         if let id = id { payload["id"] = id }
         dispatch("PlaybackError", payload)
@@ -348,7 +363,7 @@ final class ProtendaiMediaPlayer: NSObject {
     @objc private func itemEnded(_ note: Notification) {
         DispatchQueue.main.async {
             guard (note.object as? AVPlayerItem) === self.player.currentItem else { return }
-            if let id = self.currentItem?.id { self.clearPosition(id) }
+            if let id = self.loadedId { self.clearPosition(id) }
 
             if self.repeatMode == "one" {
                 self.player.seek(to: .zero)
@@ -546,7 +561,7 @@ final class ProtendaiMediaPlayer: NSObject {
 
     private func savePosition() {
         lastSave = Date()
-        guard let id = currentItem?.id, player.currentItem != nil else { return }
+        guard let id = loadedId, player.currentItem != nil else { return }
         let position = currentSeconds
         let duration = durationSeconds
         var all = positions()
