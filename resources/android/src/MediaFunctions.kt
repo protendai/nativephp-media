@@ -1,15 +1,12 @@
 package com.protendai.media
 
-import android.Manifest
 import android.content.ContentUris
 import android.content.Intent
-import android.content.pm.PackageManager
 import android.graphics.Bitmap
 import android.graphics.BitmapFactory
 import android.media.MediaMetadataRetriever
 import android.net.Uri
 import android.provider.MediaStore
-import androidx.core.content.ContextCompat
 import androidx.fragment.app.FragmentActivity
 import com.nativephp.mobile.bridge.BridgeFunction
 import org.json.JSONArray
@@ -29,18 +26,18 @@ object MediaFunctions {
         override fun execute(parameters: Map<String, Any>): Map<String, Any> {
             MediaManager.attach(activity)
             val items = jsonArray(parameters["items"]) ?: return mapOf("ok" to false)
-            MediaManager.setQueue(
+            val queued = MediaManager.setQueue(
                 items,
                 int(parameters["startIndex"], 0),
                 long(parameters["startPosition"], -1L),
                 bool(parameters["play"], true),
             )
-            return mapOf("ok" to true)
+            return mapOf("ok" to queued)
         }
     }
 
     class Play(private val activity: FragmentActivity) : BridgeFunction {
-        override fun execute(parameters: Map<String, Any>) = command(activity) { it.play() }
+        override fun execute(parameters: Map<String, Any>) = command(activity) { MediaManager.play(it) }
     }
 
     class Pause(private val activity: FragmentActivity) : BridgeFunction {
@@ -49,14 +46,11 @@ object MediaFunctions {
 
     class Toggle(private val activity: FragmentActivity) : BridgeFunction {
         override fun execute(parameters: Map<String, Any>) = command(activity) {
-            if (it.isPlaying) it.pause() else {
-                // Replay a finished queue from the top instead of doing nothing.
-                if (it.playbackState == androidx.media3.common.Player.STATE_ENDED) it.seekToDefaultPosition(0)
-                it.play()
-            }
+            if (it.isPlaying) it.pause() else MediaManager.play(it)
         }
     }
 
+    /** Next item from its start (saved positions apply to setQueue and skipTo only). */
     class Next(private val activity: FragmentActivity) : BridgeFunction {
         override fun execute(parameters: Map<String, Any>) = command(activity) { it.seekToNextMediaItem() }
     }
@@ -66,10 +60,11 @@ object MediaFunctions {
         override fun execute(parameters: Map<String, Any>) = command(activity) { it.seekToPrevious() }
     }
 
+    /** Jump to a queue index, resuming that item's saved position. */
     class SkipTo(private val activity: FragmentActivity) : BridgeFunction {
         override fun execute(parameters: Map<String, Any>): Map<String, Any> {
             val index = int(parameters["index"], -1)
-            return command(activity) { if (index in 0 until it.mediaItemCount) it.seekToDefaultPosition(index) }
+            return command(activity) { MediaManager.skipTo(it, index) }
         }
     }
 
@@ -121,11 +116,23 @@ object MediaFunctions {
         override fun execute(parameters: Map<String, Any>): Map<String, Any> {
             MediaManager.attach(activity)
             val items = jsonArray(parameters["items"]) ?: return mapOf("ok" to false)
-            MediaManager.setQueue(items, int(parameters["startIndex"], 0), long(parameters["startPosition"], -1L), true)
+            if (!MediaManager.setQueue(items, int(parameters["startIndex"], 0), long(parameters["startPosition"], -1L), true)) {
+                return mapOf("ok" to false)
+            }
+
+            // The ids this player window is responsible for: closing it only stops
+            // playback while one of them is still what the shared player holds.
+            val ids = ArrayList((0 until items.length()).mapNotNull { i ->
+                items.optJSONObject(i)?.let { item ->
+                    item.optString("id").takeIf { it.isNotBlank() && !item.isNull("id") }
+                        ?: item.optString("uri").takeIf { it.isNotBlank() }
+                }
+            })
 
             activity.runOnUiThread {
-                // By name: VideoActivity lives in its own file and is declared in the manifest.
-                activity.startActivity(Intent().setClassName(activity, "com.protendai.media.VideoActivity"))
+                activity.startActivity(
+                    Intent(activity, VideoActivity::class.java).putStringArrayListExtra(VideoActivity.EXTRA_IDS, ids),
+                )
             }
             return mapOf("ok" to true)
         }
@@ -261,22 +268,29 @@ object MediaFunctions {
             getColumnIndex(column).takeIf { it >= 0 && !isNull(it) }?.let { getLong(it) } ?: 0L
     }
 
-    /** Ask for READ_MEDIA_AUDIO / READ_MEDIA_VIDEO. Result: PermissionResult. */
+    /**
+     * Ask for READ_MEDIA_AUDIO / READ_MEDIA_VIDEO (+ partial video access on
+     * Android 14). Result: PermissionResult. Needs library access enabled at
+     * build time; otherwise answers granted = false without a dialog.
+     */
     class RequestPermission(private val activity: FragmentActivity) : BridgeFunction {
         override fun execute(parameters: Map<String, Any>): Map<String, Any> {
             val type = if (parameters["type"] == "video") "video" else "audio"
-            val permissions = permissionsFor(type)
-
-            if (granted(activity, permissions)) {
-                MediaManager.attach(activity)
-                MediaManager.dispatch("PermissionResult", JSONObject().put("granted", true).put("type", type))
-                return mapOf("ok" to true, "granted" to true)
-            }
-
             MediaManager.attach(activity)
-            PermissionFragment.request(activity, permissions) { ok ->
-                MediaManager.dispatch("PermissionResult", JSONObject().put("granted", ok).put("type", type))
+
+            if (MediaPermissions.fullyGranted(activity, type)) {
+                MediaPermissions.dispatchResult(activity, type)
+                return mapOf("ok" to true, "granted" to true, "limited" to false)
             }
+
+            if (!MediaPermissions.declared(activity, type)) {
+                MediaPermissions.warnNotDeclared(type)
+                MediaPermissions.dispatchResult(activity, type)
+                return mapOf("ok" to false, "granted" to false, "error" to "library_disabled")
+            }
+
+            // Limited video access asks again, so the user can pick more videos or allow all.
+            PermissionFragment.request(activity, type, MediaPermissions.forType(type))
             return mapOf("ok" to true)
         }
     }
@@ -284,22 +298,16 @@ object MediaFunctions {
     class HasPermission(private val activity: FragmentActivity) : BridgeFunction {
         override fun execute(parameters: Map<String, Any>): Map<String, Any> {
             val type = if (parameters["type"] == "video") "video" else "audio"
-            return mapOf("granted" to granted(activity, permissionsFor(type)))
+            return mapOf(
+                "granted" to MediaPermissions.granted(activity, type),
+                "limited" to MediaPermissions.limited(activity, type),
+            )
         }
     }
 
     // ── Helpers ──────────────────────────────────────────────────
 
     private const val MAX_ART = 512
-
-    private fun permissionsFor(type: String): Array<String> = when {
-        android.os.Build.VERSION.SDK_INT < 33 -> arrayOf(Manifest.permission.READ_EXTERNAL_STORAGE)
-        type == "video" -> arrayOf(Manifest.permission.READ_MEDIA_VIDEO)
-        else -> arrayOf(Manifest.permission.READ_MEDIA_AUDIO)
-    }
-
-    private fun granted(activity: FragmentActivity, permissions: Array<String>): Boolean =
-        permissions.all { ContextCompat.checkSelfPermission(activity, it) == PackageManager.PERMISSION_GRANTED }
 
     /** Fire a controller command and refresh the cached state right after. */
     private fun command(activity: FragmentActivity, block: (androidx.media3.session.MediaController) -> Unit): Map<String, Any> {

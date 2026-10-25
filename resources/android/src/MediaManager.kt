@@ -1,5 +1,7 @@
 package com.protendai.media
 
+import android.app.Activity
+import android.app.Application
 import android.content.ComponentName
 import android.content.Context
 import android.net.Uri
@@ -22,6 +24,7 @@ import com.nativephp.mobile.utils.NativeActionCoordinator
 import org.json.JSONArray
 import org.json.JSONObject
 import java.io.File
+import java.lang.ref.WeakReference
 
 /**
  * The PHP-facing side of the player: a MediaController connected to
@@ -29,39 +32,63 @@ import java.io.File
  * dispatch, and per-item resume positions.
  *
  * All controller calls happen on the main thread (Media3 requires it);
- * commands issued before the controller connects are queued.
+ * commands issued before the controller connects are queued (bounded).
+ *
+ * Events go to PHP through the NativePHP host activity. That activity is
+ * held weakly and re-adopted automatically when the app's UI is recreated
+ * (music keeps playing in the service after the activity finishes); events
+ * raised while no UI exists are buffered and delivered when it comes back
+ * (see [deliver]).
  */
 @OptIn(UnstableApi::class)
 object MediaManager {
 
     const val TAG = "ProtendaiMedia"
+    const val EXTRA_TYPE = "protendai_type"
     private const val EVENT_NAMESPACE = "Protendai\\Media\\Events\\"
     private const val PREFS = "protendai_media_positions"
     private const val TICK_MS = 500L
     private const val SAVE_EVERY_MS = 5_000L
     private const val END_MARGIN_MS = 5_000L
-    private const val EXTRA_TYPE = "protendai_type"
+    private const val MAX_PENDING_COMMANDS = 32
+    private const val MAX_BUFFERED_EVENTS = 16
 
-    private var appContext: Context? = null
-    private var activityRef: FragmentActivity? = null
+    @Volatile private var appContext: Context? = null
     private val main = Handler(Looper.getMainLooper())
+
+    // Main thread only from here on.
+    private var activityRef: WeakReference<FragmentActivity>? = null
+    private var hostClass: String? = null
+    private var lifecycleRegistered = false
+    private val bufferedEvents = ArrayDeque<Pair<String, String>>()
+    private var bufferedState: String? = null
 
     private var controller: MediaController? = null
     private var controllerFuture: ListenableFuture<MediaController>? = null
-    private val pending = mutableListOf<(MediaController) -> Unit>() // main thread only
+    private val pending = ArrayDeque<(MediaController) -> Unit>()
 
     @Volatile private var state: JSONObject = idleState()
     private var lastSignature: String? = null
     private var lastSaveAt = 0L
     private var currentId: String? = null
+    private var durationId: String? = null
+    private var durationMs = 0L
     private var lastError: String? = null
 
     // ── Connection ───────────────────────────────────────────────
 
+    /**
+     * Called by every bridge function with the NativePHP host activity: it
+     * becomes the event target, and the controller connects if needed.
+     */
     fun attach(activity: FragmentActivity) {
-        activityRef = activity
         if (appContext == null) appContext = activity.applicationContext
-        main.post { connect() }
+        main.post {
+            registerLifecycle(activity.application)
+            adopt(activity)
+            flushBuffered()
+            connect()
+        }
     }
 
     /** Run [block] on the main thread with a connected controller (queued until connected). */
@@ -71,7 +98,9 @@ object MediaManager {
             if (c != null) {
                 block(c)
             } else {
-                pending.add(block)
+                // Bounded: if the service never comes up, don't replay a pile of stale taps later.
+                while (pending.size >= MAX_PENDING_COMMANDS) pending.removeFirst()
+                pending.addLast(block)
                 connect()
             }
         }
@@ -85,7 +114,7 @@ object MediaManager {
         val future = MediaController.Builder(context, token)
             .setListener(object : MediaController.Listener {
                 override fun onDisconnected(controller: MediaController) {
-                    Log.w(TAG, "controller disconnected")
+                    main.removeCallbacks(tick)
                     this@MediaManager.controller = null
                     controllerFuture = null
                 }
@@ -95,14 +124,22 @@ object MediaManager {
 
         future.addListener({
             val c = runCatching { future.get() }.getOrElse {
-                Log.e(TAG, "controller connection failed", it)
+                Log.w(TAG, "Could not connect to the playback service")
                 controllerFuture = null
+                // The queued commands can't run; drop them rather than replaying them much later.
+                pending.clear()
+                dispatch(
+                    "PlaybackError",
+                    JSONObject().put("id", JSONObject.NULL).put("message", "The playback service could not be started"),
+                )
                 return@addListener
             }
             controller = c
             c.addListener(playerListener)
+            currentId = c.currentMediaItem?.mediaId
             refreshState()
-            // Reconnecting while music already plays (app reopened): resume the tick.
+            // Reconnecting while music already plays (app reopened): resume the tick, once.
+            main.removeCallbacks(tick)
             if (c.isPlaying) main.postDelayed(tick, TICK_MS)
             val queued = pending.toList()
             pending.clear()
@@ -114,32 +151,52 @@ object MediaManager {
 
     /**
      * Replace the queue. [startPositionMs] < 0 resumes the start item from its
-     * saved position (0 when there is none).
+     * saved position (0 when there is none). Returns false when no item is usable.
      */
-    fun setQueue(items: JSONArray, startIndex: Int, startPositionMs: Long, play: Boolean) {
+    fun setQueue(items: JSONArray, startIndex: Int, startPositionMs: Long, play: Boolean): Boolean {
         val mediaItems = (0 until items.length()).mapNotNull { items.optJSONObject(it)?.let(::toMediaItem) }
-        if (mediaItems.isEmpty()) return
+        if (mediaItems.isEmpty()) return false
 
         val index = startIndex.coerceIn(0, mediaItems.size - 1)
-        val position = if (startPositionMs >= 0) startPositionMs else savedPosition(mediaItems[index].mediaId)
 
         withController { c ->
+            // Remember where the outgoing item was before it is replaced
+            // (it may be the same id as the new start item).
+            savePosition(c)
+            val position = if (startPositionMs >= 0) startPositionMs else savedPosition(mediaItems[index].mediaId)
             lastError = null
             c.setMediaItems(mediaItems, index, position)
             c.prepare()
             if (play) c.play()
             refreshState()
         }
+        return true
+    }
+
+    /** Jump to queue [index], resuming that item's saved position (same rule as setQueue). */
+    fun skipTo(c: MediaController, index: Int) {
+        if (index !in 0 until c.mediaItemCount) return
+        savePosition(c)
+        c.seekTo(index, savedPosition(c.getMediaItemAt(index).mediaId))
+    }
+
+    /** Play; a finished queue starts again from its first item. */
+    fun play(c: MediaController) {
+        if (c.playbackState == Player.STATE_ENDED && !c.currentTimeline.isEmpty) {
+            c.seekToDefaultPosition(c.currentTimeline.getFirstWindowIndex(c.shuffleModeEnabled))
+        }
+        if (c.playbackState == Player.STATE_IDLE) c.prepare()
+        c.play()
     }
 
     private fun toMediaItem(json: JSONObject): MediaItem? {
-        val rawUri = json.optString("uri").takeIf { it.isNotBlank() } ?: return null
+        val rawUri = json.optNullableString("uri") ?: return null
         val uri = toUri(rawUri)
-        val id = json.optString("id").takeIf { it.isNotBlank() } ?: rawUri
-        val type = json.optString("type").takeIf { it == "video" } ?: "audio"
+        val id = json.optNullableString("id") ?: rawUri
+        val type = if (json.optString("type") == "video") "video" else "audio"
 
         val metadata = MediaMetadata.Builder()
-            .setTitle(json.optNullableString("title") ?: File(rawUri).nameWithoutExtension)
+            .setTitle(json.optNullableString("title") ?: File(uri.path ?: rawUri).nameWithoutExtension)
             .setArtist(json.optNullableString("artist"))
             .setAlbumTitle(json.optNullableString("album"))
             .setArtworkUri(json.optNullableString("artwork")?.let(::toUri))
@@ -187,6 +244,11 @@ object MediaManager {
         val item = c.currentMediaItem
         val meta = item?.mediaMetadata
 
+        if (item != null && c.duration > 0) {
+            durationId = item.mediaId
+            durationMs = c.duration
+        }
+
         val next = JSONObject()
             .put("playing", c.isPlaying)
             .put("buffering", c.playbackState == Player.STATE_BUFFERING)
@@ -218,6 +280,7 @@ object MediaManager {
             val c = controller ?: return
             refreshState()
             if (System.currentTimeMillis() - lastSaveAt >= SAVE_EVERY_MS) savePosition(c)
+            main.removeCallbacks(this)
             if (c.isPlaying) main.postDelayed(this, TICK_MS)
         }
     }
@@ -232,9 +295,23 @@ object MediaManager {
             }
         }
 
+        /**
+         * A seek that lands on another item (next, previous, skipTo, or a
+         * notification / Bluetooth control): save where the outgoing item was.
+         * Media3 reports the old position here, before anything else moves.
+         */
+        override fun onPositionDiscontinuity(oldPosition: Player.PositionInfo, newPosition: Player.PositionInfo, reason: Int) {
+            if (reason != Player.DISCONTINUITY_REASON_SEEK) return
+            if (oldPosition.mediaItemIndex == newPosition.mediaItemIndex) return
+            val id = oldPosition.mediaItem?.mediaId ?: return
+            savePositionFor(id, oldPosition.positionMs, if (id == durationId) durationMs else 0L)
+        }
+
         override fun onMediaItemTransition(mediaItem: MediaItem?, reason: Int) {
             // Leaving an item that played to its end: forget its resume point.
-            if (reason == Player.MEDIA_ITEM_TRANSITION_REASON_AUTO) currentId?.let(::clearPosition)
+            if (reason == Player.MEDIA_ITEM_TRANSITION_REASON_AUTO || reason == Player.MEDIA_ITEM_TRANSITION_REASON_REPEAT) {
+                currentId?.let(::clearPosition)
+            }
             currentId = mediaItem?.mediaId
             lastError = null
 
@@ -258,8 +335,9 @@ object MediaManager {
         }
 
         override fun onPlayerError(error: PlaybackException) {
+            // The message can contain the file path or URL: give PHP the error, keep logs free of it.
             lastError = error.message ?: error.errorCodeName
-            Log.w(TAG, "playback error: $lastError", error)
+            Log.w(TAG, "Playback error ${error.errorCodeName}")
             dispatch(
                 "PlaybackError",
                 JSONObject()
@@ -277,19 +355,21 @@ object MediaManager {
 
     private fun prefs() = appContext?.getSharedPreferences(PREFS, Context.MODE_PRIVATE)
 
-    private fun savedPosition(id: String): Long = prefs()?.getLong(id, 0L) ?: 0L
+    fun savedPosition(id: String): Long = prefs()?.getLong(id, 0L) ?: 0L
 
-    private fun savePosition(c: MediaController) {
+    /** Save the current item's position (main thread). */
+    fun savePosition(c: MediaController) {
         lastSaveAt = System.currentTimeMillis()
         val id = c.currentMediaItem?.mediaId ?: return
-        val position = c.currentPosition
-        val duration = c.duration
+        savePositionFor(id, c.currentPosition, c.duration)
+    }
 
+    private fun savePositionFor(id: String, positionMs: Long, durationMs: Long) {
         // Near the end counts as finished: next time starts from the top.
-        if (duration > 0 && duration - position <= END_MARGIN_MS) {
+        if (durationMs > 0 && durationMs - positionMs <= END_MARGIN_MS) {
             clearPosition(id)
-        } else if (position > 0) {
-            prefs()?.edit()?.putLong(id, position)?.apply()
+        } else if (positionMs > 0) {
+            prefs()?.edit()?.putLong(id, positionMs)?.apply()
         }
     }
 
@@ -318,13 +398,83 @@ object MediaManager {
 
     fun context(): Context? = appContext
 
+    // ── Events ───────────────────────────────────────────────────
+
+    /** Send a Protendai\Media\Events\<event> to PHP (any thread). */
     fun dispatch(event: String, payload: JSONObject) {
-        val activity = activityRef ?: return
-        activity.runOnUiThread {
-            NativeActionCoordinator.dispatchEvent(activity, EVENT_NAMESPACE + event, payload.toString())
+        val json = payload.toString()
+        main.post { deliver(event, json) }
+    }
+
+    /**
+     * Deliver to the live host activity. Without one (the activity finished
+     * while music plays on, or is being recreated) the event is buffered:
+     * the latest StateChanged plus up to [MAX_BUFFERED_EVENTS] others, sent
+     * in order once the activity is back.
+     */
+    private fun deliver(event: String, json: String) {
+        val activity = liveActivity()
+        if (activity != null && runCatching {
+                NativeActionCoordinator.dispatchEvent(activity, EVENT_NAMESPACE + event, json)
+            }.isSuccess
+        ) {
+            return
+        }
+
+        if (event == "StateChanged") {
+            bufferedState = json
+        } else {
+            while (bufferedEvents.size >= MAX_BUFFERED_EVENTS) bufferedEvents.removeFirst()
+            bufferedEvents.addLast(event to json)
         }
     }
 
+    private fun flushBuffered() {
+        if (liveActivity() == null) return
+        val events = bufferedEvents.toList()
+        val stateJson = bufferedState
+        bufferedEvents.clear()
+        bufferedState = null
+        events.forEach { (event, json) -> deliver(event, json) }
+        // Always end on the freshest state.
+        if (stateJson != null) deliver("StateChanged", state.toString())
+    }
+
+    private fun liveActivity(): FragmentActivity? =
+        activityRef?.get()?.takeIf { !it.isFinishing && !it.isDestroyed }
+
+    private fun adopt(activity: FragmentActivity) {
+        hostClass = activity.javaClass.name
+        if (activityRef?.get() !== activity) activityRef = WeakReference(activity)
+    }
+
+    /**
+     * Follow the host activity across recreation: a new instance of the
+     * activity class that called the bridge becomes the event target as soon
+     * as it is resumed, without waiting for PHP to call the plugin again.
+     */
+    private fun registerLifecycle(application: Application) {
+        if (lifecycleRegistered) return
+        lifecycleRegistered = true
+        application.registerActivityLifecycleCallbacks(object : Application.ActivityLifecycleCallbacks {
+            override fun onActivityCreated(activity: Activity, savedInstanceState: Bundle?) {}
+            override fun onActivityStarted(activity: Activity) {}
+            override fun onActivityResumed(activity: Activity) {
+                if (activity is FragmentActivity && activity.javaClass.name == hostClass) {
+                    adopt(activity)
+                    // Let the activity finish resuming before touching its fragments.
+                    main.post { flushBuffered() }
+                }
+            }
+            override fun onActivityPaused(activity: Activity) {}
+            override fun onActivityStopped(activity: Activity) {}
+            override fun onActivitySaveInstanceState(activity: Activity, outState: Bundle) {}
+            override fun onActivityDestroyed(activity: Activity) {
+                if (activityRef?.get() === activity) activityRef = null
+            }
+        })
+    }
+
     private fun JSONObject.optNullableString(key: String): String? =
-        if (isNull(key)) null else optString(key).takeIf { it.isNotBlank() }
+        if (!has(key) || isNull(key)) null else optString(key).takeIf { it.isNotBlank() }
 }
