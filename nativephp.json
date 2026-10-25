@@ -1,95 +1,144 @@
 {
+    "name": "protendai/nativephp-media",
+    "version": "1.0.0",
+    "description": "Media player for NativePHP Mobile on iOS and Android: background audio with lock-screen, notification and Bluetooth controls, queues, shuffle/repeat, speed, per-item resume, a full-screen video player with picture-in-picture, and opt-in device media library access.",
     "namespace": "Media",
+    "keywords": [
+        "media",
+        "audio",
+        "video",
+        "player",
+        "background audio",
+        "picture-in-picture",
+        "media3",
+        "avplayer",
+        "music library"
+    ],
+    "category": "media",
+    "license": "MIT",
+    "pricing": {
+        "type": "free"
+    },
+    "author": {
+        "name": "Tendai Karuma",
+        "email": "karumatendai@gmail.com",
+        "url": "https://github.com/protendai"
+    },
+    "homepage": "https://github.com/protendai/nativephp-media",
+    "repository": "https://github.com/protendai/nativephp-media",
+    "funding": [],
+    "platforms": [
+        "android",
+        "ios"
+    ],
     "bridge_functions": [
         {
             "name": "Media.SetQueue",
             "android": "com.protendai.media.MediaFunctions.SetQueue",
-            "ios": "MediaFunctions.SetQueue"
+            "ios": "MediaFunctions.SetQueue",
+            "description": "Replace the queue and (by default) start playing. Async: TrackChanged, StateChanged."
         },
         {
             "name": "Media.Play",
             "android": "com.protendai.media.MediaFunctions.Play",
-            "ios": "MediaFunctions.Play"
+            "ios": "MediaFunctions.Play",
+            "description": "Resume playback; a finished queue starts again from the top. Async: StateChanged."
         },
         {
             "name": "Media.Pause",
             "android": "com.protendai.media.MediaFunctions.Pause",
-            "ios": "MediaFunctions.Pause"
+            "ios": "MediaFunctions.Pause",
+            "description": "Pause playback. Async: StateChanged."
         },
         {
             "name": "Media.Toggle",
             "android": "com.protendai.media.MediaFunctions.Toggle",
-            "ios": "MediaFunctions.Toggle"
+            "ios": "MediaFunctions.Toggle",
+            "description": "Play or pause. Async: StateChanged."
         },
         {
             "name": "Media.Next",
             "android": "com.protendai.media.MediaFunctions.Next",
-            "ios": "MediaFunctions.Next"
+            "ios": "MediaFunctions.Next",
+            "description": "Skip to the next item, from its start. Async: TrackChanged."
         },
         {
             "name": "Media.Previous",
             "android": "com.protendai.media.MediaFunctions.Previous",
-            "ios": "MediaFunctions.Previous"
+            "ios": "MediaFunctions.Previous",
+            "description": "Restart the item when past 3 s, otherwise go to the previous item. Async: TrackChanged."
         },
         {
             "name": "Media.SkipTo",
             "android": "com.protendai.media.MediaFunctions.SkipTo",
-            "ios": "MediaFunctions.SkipTo"
+            "ios": "MediaFunctions.SkipTo",
+            "description": "Jump to a queue index and play it, resuming its saved position. Async: TrackChanged."
         },
         {
             "name": "Media.Seek",
             "android": "com.protendai.media.MediaFunctions.Seek",
-            "ios": "MediaFunctions.Seek"
+            "ios": "MediaFunctions.Seek",
+            "description": "Seek within the current item (milliseconds)."
         },
         {
             "name": "Media.SetShuffle",
             "android": "com.protendai.media.MediaFunctions.SetShuffle",
-            "ios": "MediaFunctions.SetShuffle"
+            "ios": "MediaFunctions.SetShuffle",
+            "description": "Turn shuffle on or off. Async: StateChanged."
         },
         {
             "name": "Media.SetRepeat",
             "android": "com.protendai.media.MediaFunctions.SetRepeat",
-            "ios": "MediaFunctions.SetRepeat"
+            "ios": "MediaFunctions.SetRepeat",
+            "description": "Repeat mode off, one or all. Async: StateChanged."
         },
         {
             "name": "Media.SetSpeed",
             "android": "com.protendai.media.MediaFunctions.SetSpeed",
-            "ios": "MediaFunctions.SetSpeed"
+            "ios": "MediaFunctions.SetSpeed",
+            "description": "Playback speed 0.25 to 3.0. Async: StateChanged."
         },
         {
             "name": "Media.Stop",
             "android": "com.protendai.media.MediaFunctions.Stop",
-            "ios": "MediaFunctions.Stop"
+            "ios": "MediaFunctions.Stop",
+            "description": "Stop, clear the queue and remove the notification. Async: StateChanged."
         },
         {
             "name": "Media.State",
             "android": "com.protendai.media.MediaFunctions.State",
-            "ios": "MediaFunctions.State"
+            "ios": "MediaFunctions.State",
+            "description": "The cached playback state snapshot."
         },
         {
             "name": "Media.OpenVideo",
             "android": "com.protendai.media.MediaFunctions.OpenVideo",
-            "ios": "MediaFunctions.OpenVideo"
+            "ios": "MediaFunctions.OpenVideo",
+            "description": "Queue items and open the full-screen video player (picture-in-picture)."
         },
         {
             "name": "Media.Probe",
             "android": "com.protendai.media.MediaFunctions.Probe",
-            "ios": "MediaFunctions.Probe"
+            "ios": "MediaFunctions.Probe",
+            "description": "Read tags, duration and dimensions; optionally write cover art or a video frame as JPEG."
         },
         {
             "name": "Media.Library",
             "android": "com.protendai.media.MediaFunctions.Library",
-            "ios": "MediaFunctions.Library"
+            "ios": "MediaFunctions.Library",
+            "description": "One page of the device music or video library (needs library access enabled)."
         },
         {
             "name": "Media.RequestPermission",
             "android": "com.protendai.media.MediaFunctions.RequestPermission",
-            "ios": "MediaFunctions.RequestPermission"
+            "ios": "MediaFunctions.RequestPermission",
+            "description": "Ask for device library access. Async: PermissionResult."
         },
         {
             "name": "Media.HasPermission",
             "android": "com.protendai.media.MediaFunctions.HasPermission",
-            "ios": "MediaFunctions.HasPermission"
+            "ios": "MediaFunctions.HasPermission",
+            "description": "Whether device library access is granted (and whether it is limited)."
         }
     ],
     "events": [
@@ -100,13 +149,11 @@
         "Protendai\\Media\\Events\\PermissionResult"
     ],
     "android": {
+        "min_version": 29,
         "permissions": [
             "android.permission.FOREGROUND_SERVICE",
             "android.permission.FOREGROUND_SERVICE_MEDIA_PLAYBACK",
-            "android.permission.WAKE_LOCK",
-            "android.permission.READ_MEDIA_AUDIO",
-            "android.permission.READ_MEDIA_VIDEO",
-            "<uses-permission android:name=\"android.permission.READ_EXTERNAL_STORAGE\" android:maxSdkVersion=\"32\" />"
+            "android.permission.WAKE_LOCK"
         ],
         "services": [
             {
@@ -116,6 +163,17 @@
                 "intent_filters": [
                     {
                         "action": "androidx.media3.session.MediaSessionService"
+                    }
+                ]
+            }
+        ],
+        "receivers": [
+            {
+                "name": "androidx.media3.session.MediaButtonReceiver",
+                "exported": true,
+                "intent_filters": [
+                    {
+                        "action": "android.intent.action.MEDIA_BUTTON"
                     }
                 ]
             }
@@ -135,20 +193,16 @@
                 "androidx.media3:media3-session:1.5.1",
                 "androidx.media3:media3-ui:1.5.1"
             ]
-        },
-        "min_version": 29
-    },
-    "ios": {
-        "min_version": "18.0",
-        "background_modes": [
-            "audio"
-        ],
-        "info_plist": {
-            "NSAppleMusicUsageDescription": "Lets you play the music saved on this iPhone.",
-            "NSPhotoLibraryUsageDescription": "Lets you play the videos in your photo library."
         }
     },
+    "ios": {
+        "min_version": "16.0",
+        "background_modes": [
+            "audio"
+        ]
+    },
     "hooks": {
-        "post_compile": "nativephp:media:enable-pip"
-    }
+        "post_compile": "nativephp:media:configure"
+    },
+    "service_provider": "Protendai\\Media\\MediaServiceProvider"
 }

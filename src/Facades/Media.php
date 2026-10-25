@@ -24,6 +24,7 @@ use Illuminate\Support\Facades\Facade;
  * @method static array libraryPage(string $type = 'audio', int $limit = 60, int $offset = 0)
  * @method static array library(string $type = 'audio', int $limit = 500, int $offset = 0)
  * @method static bool hasPermission(string $type = 'audio')
+ * @method static array permissionStatus(string $type = 'audio')
  * @method static void requestPermission(string $type = 'audio')
  *
  * @see \Protendai\Media\Media

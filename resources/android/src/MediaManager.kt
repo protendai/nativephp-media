@@ -173,11 +173,13 @@ object MediaManager {
         return true
     }
 
-    /** Jump to queue [index], resuming that item's saved position (same rule as setQueue). */
+    /** Jump to queue [index] and play it, resuming its saved position (same rule as setQueue). */
     fun skipTo(c: MediaController, index: Int) {
         if (index !in 0 until c.mediaItemCount) return
         savePosition(c)
         c.seekTo(index, savedPosition(c.getMediaItemAt(index).mediaId))
+        if (c.playbackState == Player.STATE_IDLE) c.prepare()
+        c.play()
     }
 
     /** Play; a finished queue starts again from its first item. */

@@ -3,13 +3,14 @@
 namespace Protendai\Media;
 
 /**
- * A proper media player for NativePHP Mobile (Android).
+ * A proper media player for NativePHP Mobile (iOS and Android).
  *
- * PHP is the remote control: a native Media3 service owns the player, keeps
- * playing with the app in the background, and drives the notification,
- * lock-screen and Bluetooth controls. Every method here is a thin,
- * synchronous bridge call; changes come back as events under
- * Protendai\Media\Events, and state() reads a snapshot the native side keeps.
+ * PHP is the remote control: a native player (Media3 service on Android,
+ * AVPlayer on iOS) owns playback, keeps playing with the app in the
+ * background, and drives the notification / lock-screen / Bluetooth
+ * controls. Every method here is a thin, synchronous bridge call; changes
+ * come back as events under Protendai\Media\Events, and state() reads a
+ * snapshot the native side keeps.
  *
  * A queue item is:
  *   ['id' => 'stable-key', 'uri' => '/path/or/content://...', 'title' => ?, 'artist' => ?,
@@ -198,8 +199,10 @@ class Media
     }
 
     /**
-     * The device's audio or video files (MediaStore). Needs permission
-     * first: see hasPermission() / requestPermission().
+     * The device's audio or video files, newest first: MediaStore on Android,
+     * the Music app's downloaded DRM-free songs / the Photos library on iOS.
+     * Needs library access enabled and permission granted: see
+     * hasPermission() / requestPermission().
      *
      * @param  'audio'|'video'  $type
      * @return list<array{id: string, uri: string, title: ?string, artist: ?string, album: ?string, durationMs: int, size: int, dateAdded: int, folder: ?string, mime: ?string}>
@@ -218,7 +221,8 @@ class Media
      */
     public function libraryPage(string $type = 'audio', int $limit = 60, int $offset = 0): array
     {
-        $result = $this->decode($this->call('Media.Library', ['type' => $type, 'limit' => $limit, 'offset' => $offset]));
+        $offset = max(0, $offset);
+        $result = $this->decode($this->call('Media.Library', ['type' => $this->type($type), 'limit' => max(1, $limit), 'offset' => $offset]));
         $items = array_values(array_filter($result['items'] ?? [], 'is_array'));
 
         return [
@@ -230,22 +234,46 @@ class Media
     }
 
     /**
+     * Whether the app may read the device library of this type. Limited
+     * access (iOS "Selected Photos", Android 14 "Select videos") counts.
+     *
      * @param  'audio'|'video'  $type
      */
     public function hasPermission(string $type = 'audio'): bool
     {
-        return (bool) ($this->decode($this->call('Media.HasPermission', ['type' => $type]))['granted'] ?? false);
+        return $this->permissionStatus($type)['granted'];
     }
 
     /**
-     * Prompt for READ_MEDIA_AUDIO / READ_MEDIA_VIDEO (or storage on Android 12
-     * and older). Answers with a PermissionResult event.
+     * Library access in detail: limited = only the items the user picked.
+     *
+     * @param  'audio'|'video'  $type
+     * @return array{granted: bool, limited: bool}
+     */
+    public function permissionStatus(string $type = 'audio'): array
+    {
+        $result = $this->decode($this->call('Media.HasPermission', ['type' => $this->type($type)]));
+        $granted = (bool) ($result['granted'] ?? false);
+
+        return ['granted' => $granted, 'limited' => $granted && (bool) ($result['limited'] ?? false)];
+    }
+
+    /**
+     * Ask for library access: READ_MEDIA_AUDIO / READ_MEDIA_VIDEO on Android
+     * (storage on Android 12 and older), Music / Photos on iOS. Answers with a
+     * PermissionResult event. Library access must be enabled at build time
+     * (config nativephp-media.library); otherwise the answer is granted = false.
      *
      * @param  'audio'|'video'  $type
      */
     public function requestPermission(string $type = 'audio'): void
     {
-        $this->call('Media.RequestPermission', ['type' => $type]);
+        $this->call('Media.RequestPermission', ['type' => $this->type($type)]);
+    }
+
+    private function type(string $type): string
+    {
+        return $type === 'video' ? 'video' : 'audio';
     }
 
     private function ok(?string $result): bool
