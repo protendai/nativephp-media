@@ -1,6 +1,7 @@
 package com.protendai.media
 
 import android.app.PictureInPictureParams
+import android.content.Intent
 import android.content.pm.ActivityInfo
 import android.content.res.Configuration
 import android.graphics.Color
@@ -23,6 +24,7 @@ import androidx.core.view.ViewCompat
 import androidx.core.view.WindowCompat
 import androidx.core.view.WindowInsetsCompat
 import androidx.core.view.WindowInsetsControllerCompat
+import androidx.lifecycle.Lifecycle
 import androidx.media3.common.MediaMetadata
 import androidx.media3.common.PlaybackParameters
 import androidx.media3.common.Player
@@ -53,6 +55,9 @@ class VideoActivity : AppCompatActivity(), VideoGestureOverlay.Host {
 
     private var controller: MediaController? = null
 
+    /** Queue ids this window opened (Media.OpenVideo); see [ownsPlayback]. */
+    private var openedIds: Set<String> = emptySet()
+
     override val player: Player? get() = controller
 
     private val speeds = floatArrayOf(0.5f, 0.75f, 1f, 1.25f, 1.5f, 2f)
@@ -80,6 +85,7 @@ class VideoActivity : AppCompatActivity(), VideoGestureOverlay.Host {
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
+        openedIds = intent.getStringArrayListExtra(EXTRA_IDS)?.toSet() ?: emptySet()
         window.decorView.setBackgroundColor(Color.BLACK)
         enterImmersive()
 
@@ -127,6 +133,23 @@ class VideoActivity : AppCompatActivity(), VideoGestureOverlay.Host {
             if (connected.isPlaying) window.addFlags(WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON)
             updatePipParams()
         }
+    }
+
+    /** singleTask: a second Media.OpenVideo reuses this window (and leaves PiP). */
+    override fun onNewIntent(intent: Intent) {
+        super.onNewIntent(intent)
+        setIntent(intent)
+        openedIds = intent.getStringArrayListExtra(EXTRA_IDS)?.toSet() ?: openedIds
+    }
+
+    /**
+     * Whether the shared player still plays something this window opened.
+     * Music started from the app while the video sat in PiP replaces the
+     * queue; closing the video window must not stop that music.
+     */
+    private fun ownsPlayback(): Boolean {
+        val id = controller?.currentMediaItem?.mediaId ?: return false
+        return openedIds.isEmpty() || id in openedIds
     }
 
     // ── Top bar ──────────────────────────────────────────────────
@@ -222,6 +245,13 @@ class VideoActivity : AppCompatActivity(), VideoGestureOverlay.Host {
             topBar.visibility = View.GONE
             root.bubble.visibility = View.GONE
         } else {
+            // Leaving PiP while already stopped means the window was dismissed, not expanded
+            // (some Android versions report the mode change before onStop, some after).
+            if (lifecycle.currentState == Lifecycle.State.CREATED) {
+                if (ownsPlayback()) controller?.pause()
+                finish()
+                return
+            }
             playerView.useController = true
             enterImmersive()
         }
@@ -266,14 +296,22 @@ class VideoActivity : AppCompatActivity(), VideoGestureOverlay.Host {
 
     override fun onStop() {
         super.onStop()
-        // Leaving without PiP (or closing the PiP window) pauses; the session keeps the position.
-        if (!isInPictureInPictureMode) controller?.pause()
+        if (isInPictureInPictureMode) {
+            // A PiP window only stops when the user dismisses it (swipe away / ✕):
+            // pause, and close this activity so it doesn't linger in recents.
+            if (ownsPlayback()) controller?.pause()
+            finish()
+        } else if (ownsPlayback()) {
+            // Left the full-screen player without PiP: pause; the session keeps the position.
+            controller?.pause()
+        }
     }
 
     override fun onDestroy() {
-        // Closing the video (back, or dismissing the PiP window) ends playback so no
+        // Closing the video (back, or dismissing the PiP window) ends its playback so no
         // paused media notification lingers. Pause first so the resume position is saved.
-        if (isFinishing || !isChangingConfigurations) {
+        // Only if the shared player still holds this window's video.
+        if (!isChangingConfigurations && ownsPlayback()) {
             controller?.pause()
             controller?.stop()
         }
@@ -288,5 +326,6 @@ class VideoActivity : AppCompatActivity(), VideoGestureOverlay.Host {
 
     companion object {
         private const val TAG = "ProtendaiMedia"
+        const val EXTRA_IDS = "com.protendai.media.VIDEO_IDS"
     }
 }
